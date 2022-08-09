@@ -294,17 +294,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "first-plugin"
-version = "0.1.0"
-dependencies = [
- "swc_ecma_parser",
- "swc_ecma_transforms_base",
- "swc_ecma_transforms_testing",
- "swc_plugin",
- "testing_macros",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1489,6 +1478,17 @@ dependencies = [
  "rkyv",
  "swc_common",
  "swc_ecma_ast",
+]
+
+[[package]]
+name = "swc_plugin_react_add_displayname"
+version = "0.1.0"
+dependencies = [
+ "swc_ecma_parser",
+ "swc_ecma_transforms_base",
+ "swc_ecma_transforms_testing",
+ "swc_plugin",
+ "testing_macros",
 ]
 
 [[package]]

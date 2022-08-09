@@ -1,9 +1,7 @@
-use swc_ecma_parser::{EsConfig, Syntax};
-use swc_ecma_transforms_testing::Tester;
+use swc_plugin::ast::*;
 use swc_plugin::syntax_pos::DUMMY_SP;
 use swc_plugin::{metadata::TransformPluginProgramMetadata, plugin_transform};
 
-use swc_plugin::ast::*;
 pub struct TransformVisitor;
 
 impl TransformVisitor {
@@ -15,26 +13,36 @@ impl TransformVisitor {
 impl TransformVisitor {
     fn add_displayname(&mut self, class: &mut Class, ident: &Ident) {
         let body = &class.body;
-        let jsword = JsWord::from("displayName");
-        // println!("Ident: {}", decl.ident.expect("to have ident"));
+        let new_member_name = JsWord::from("displayName");
 
-        if let None = body.iter().find(|member| {
-            if let Some(prop) = member.as_class_prop() {
-                let prop_ident = prop.key.as_ident().expect("expected to have ident");
+        let is_react_class = body.iter().any(|member| match member.as_method() {
+            Some(method) => match method.key.as_ident() {
+                Some(method_ident) => method_ident.sym == JsWord::from("render"),
+                None => false,
+            },
+            None => false,
+        });
 
-                return prop_ident.sym == jsword;
-            }
-            false
-        }) {
-            println!("adding displayName");
+        let is_displayname_declared_already = body
+            .iter()
+            .find(|member| {
+                if let Some(prop) = member.as_class_prop() {
+                    let prop_ident = prop.key.as_ident().expect("expected to have ident");
 
+                    return prop_ident.sym == new_member_name;
+                }
+                false
+            })
+            .is_some();
+
+        if is_react_class && !is_displayname_declared_already {
             class.body.insert(
                 0,
                 ClassMember::ClassProp(ClassProp {
                     span: DUMMY_SP,
                     key: PropName::Ident(Ident {
                         span: DUMMY_SP,
-                        sym: jsword,
+                        sym: new_member_name,
                         optional: false,
                     }),
                     accessibility: None,
@@ -60,63 +68,24 @@ impl TransformVisitor {
 impl VisitMut for TransformVisitor {
     fn visit_mut_decl(&mut self, decl: &mut Decl) {
         if let Decl::Var(decl) = decl {
-            println!("decl is varible ");
-            // let decls = &mut decl.decls;
             for dec in &mut decl.decls {
-                if let Some(c) = &mut dec.init {
-                    if let Some(c) = c.as_mut_class() {
-                        self.add_displayname(&mut c.class, &c.ident.as_ref().expect("sas"));
+                if let Some(expr) = &mut dec.init {
+                    if let Some(class_expr) = expr.as_mut_class() {
+                        self.add_displayname(
+                            &mut class_expr.class,
+                            &class_expr.ident.as_ref().expect("to have ident"),
+                        );
                     }
                 }
             }
         } else if let Decl::Class(decl) = decl {
-            // println!("decl is class: {:?}", decl);
             self.add_displayname(&mut decl.class, &decl.ident);
         }
     }
-    // fn visit_mut_class_decl(&mut self, decl: &mut ClassDecl) {
-    // }
 }
 #[plugin_transform]
 pub fn process_transform(program: Program, _metadata: TransformPluginProgramMetadata) -> Program {
-    println!("--------------------------------");
-    // println!("Program: {:?}", program);
-
-    let folder = program.fold_with(&mut as_folder(TransformVisitor::new()));
-    println!("--------------------------------");
-    // println!("Output: {:?}", folder);
-
-    folder
-}
-
-pub fn run() {
-    let source = "class Alert extends React.Component {
-        static componentId = 'Alert';
-
-        render() {
-            return(
-                <div>
-                    Hello from Alert!
-                </div>
-                )
-        }
-    }";
-    let syntax = Syntax::Es(EsConfig {
-        jsx: true,
-        ..Default::default()
-    });
-    Tester::run(|tester| {
-        let output = tester.apply_transform(
-            as_folder(TransformVisitor::new()),
-            "output.js",
-            syntax,
-            source,
-        )?;
-
-        println!("output: {:?}", output);
-
-        Ok(())
-    });
+    program.fold_with(&mut as_folder(TransformVisitor::new()))
 }
 
 #[cfg(test)]
@@ -137,7 +106,6 @@ mod tests {
     test!(
         Syntax::Es(EsConfig {
             jsx: true,
-
             ..Default::default()
         }),
         |_| transform(),
