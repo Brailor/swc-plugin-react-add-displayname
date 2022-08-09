@@ -4,13 +4,6 @@ use swc_plugin::syntax_pos::DUMMY_SP;
 use swc_plugin::{metadata::TransformPluginProgramMetadata, plugin_transform};
 
 use swc_plugin::ast::*;
-// use swc_plugin::utils::swc_common::Spanned;
-
-// impl VisitMut for TransformVisitor {
-// Implement necessary visit_mut_* methods for actual custom transform.
-// A comprehensive list of possible visitor methods can be found here:
-// https://rustdoc.swc.rs/swc_ecma_visit/trait.VisitMut.html
-// }
 pub struct TransformVisitor;
 
 impl TransformVisitor {
@@ -18,14 +11,13 @@ impl TransformVisitor {
         Self
     }
 }
-impl VisitMut for TransformVisitor {
-    fn visit_mut_class_decl(&mut self, decl: &mut ClassDecl) {
-        let ident = &decl.ident;
-        let class = &mut decl.class;
+
+impl TransformVisitor {
+    fn add_displayname(&mut self, class: &mut Class, ident: &Ident) {
         let body = &class.body;
         let jsword = JsWord::from("displayName");
+        // println!("Ident: {}", decl.ident.expect("to have ident"));
 
-        println!("The name of the class is: {}", ident.sym);
         if let None = body.iter().find(|member| {
             if let Some(prop) = member.as_class_prop() {
                 let prop_ident = prop.key.as_ident().expect("expected to have ident");
@@ -34,7 +26,8 @@ impl VisitMut for TransformVisitor {
             }
             false
         }) {
-            println!("The displayName prop is not on the class");
+            println!("adding displayName");
+
             class.body.insert(
                 0,
                 ClassMember::ClassProp(ClassProp {
@@ -54,16 +47,44 @@ impl VisitMut for TransformVisitor {
                     is_override: false,
                     readonly: false,
                     type_ann: None,
-                    //TODO: add correct value
-                    value: None,
+                    value: Some(Box::new(Expr::Lit(Lit::Str(Str {
+                        span: DUMMY_SP,
+                        value: ident.sym.clone(),
+                        raw: None,
+                    })))),
                 }),
             )
         }
     }
 }
+impl VisitMut for TransformVisitor {
+    fn visit_mut_decl(&mut self, decl: &mut Decl) {
+        if let Decl::Var(decl) = decl {
+            println!("decl is varible ");
+            // let decls = &mut decl.decls;
+            for dec in &mut decl.decls {
+                if let Some(c) = &mut dec.init {
+                    if let Some(c) = c.as_mut_class() {
+                        self.add_displayname(&mut c.class, &c.ident.as_ref().expect("sas"));
+                    }
+                }
+            }
+        } else if let Decl::Class(decl) = decl {
+            // println!("decl is class: {:?}", decl);
+            self.add_displayname(&mut decl.class, &decl.ident);
+        }
+    }
+    // fn visit_mut_class_decl(&mut self, decl: &mut ClassDecl) {
+    // }
+}
 #[plugin_transform]
 pub fn process_transform(program: Program, _metadata: TransformPluginProgramMetadata) -> Program {
+    println!("--------------------------------");
+    // println!("Program: {:?}", program);
+
     let folder = program.fold_with(&mut as_folder(TransformVisitor::new()));
+    println!("--------------------------------");
+    // println!("Output: {:?}", folder);
 
     folder
 }
@@ -85,14 +106,14 @@ pub fn run() {
         ..Default::default()
     });
     Tester::run(|tester| {
-        let expected = tester.apply_transform(
+        let output = tester.apply_transform(
             as_folder(TransformVisitor::new()),
             "output.js",
             syntax,
             source,
         )?;
 
-        println!("output: {:?}", expected);
+        println!("output: {:?}", output);
 
         Ok(())
     });
@@ -120,7 +141,7 @@ mod tests {
             ..Default::default()
         }),
         |_| transform(),
-        basic,
+        adds_displayname_to_class,
         "class Alert extends React.Component {
             static componentId = 'Alert';
 
@@ -130,8 +151,8 @@ mod tests {
                     </div>)
             }
         }",
-        "class Alert extends React.Component {
-            static displayName
+        r#"class Alert extends React.Component {
+            static displayName = "Alert";
             static componentId = 'Alert';
 
             render() {
@@ -139,7 +160,7 @@ mod tests {
                         Hello from Alert!
                     </div>
             }
-        }"
+        }"#
     );
 
     use std::path::PathBuf;
@@ -150,6 +171,21 @@ mod tests {
         test_fixture(
             Syntax::Typescript(TsConfig {
                 tsx: true,
+                ..Default::default()
+            }),
+            &|_| transform(),
+            &input,
+            &output,
+        );
+    }
+
+    #[testing_macros::fixture("src/tests/input_decorators.tsx")]
+    fn fixture_decorators(input: PathBuf) {
+        let output = input.with_file_name("output_decorators.js");
+        test_fixture(
+            Syntax::Typescript(TsConfig {
+                tsx: true,
+                decorators: true,
                 ..Default::default()
             }),
             &|_| transform(),
